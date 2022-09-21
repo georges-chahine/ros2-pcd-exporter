@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(pcd_exporter)
+project(tf_static_reexporter)
 
 # Default to C99
 if(NOT CMAKE_C_STANDARD)
@@ -33,12 +33,12 @@ find_package(rosidl_default_generators REQUIRED)
 include_directories( ${PCL_INCLUDE_DIRS} )
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
-add_executable(pcd_exporter src/main.cpp)
-ament_target_dependencies(pcd_exporter rclcpp pcl_ros std_msgs tf2 tf2_ros sensor_msgs geometry_msgs)
+add_executable(tf_static_reexporter src/main.cpp)
+ament_target_dependencies(tf_static_reexporter rclcpp pcl_ros std_msgs tf2 tf2_ros sensor_msgs geometry_msgs)
 # target_link_libraries (traxx_mapper ${PCL_LIBRARIES}
 
 install(TARGETS
-  pcd_exporter
+  tf_static_reexporter
   DESTINATION lib/${PROJECT_NAME})
 
 add_definitions("-DENABLE_SSE")
