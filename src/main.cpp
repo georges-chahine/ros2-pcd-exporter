@@ -1,127 +1,106 @@
+#define BOOST_BIND_NO_PLACEHOLDERS
+#include <chrono>
 #include <functional>
 #include <memory>
-#include <sstream>
 #include <string>
+
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
-#include "geometry_msgs/msg/transform_stamped.hpp"
-#include "rclcpp/rclcpp.hpp"
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2_ros/transform_broadcaster.h"
-#include <Eigen/Core>
-#include <Eigen/Dense>
-using namespace std::chrono_literals;
-class FramePublisher : public rclcpp::Node
-{
 
+#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include <pcl/octree/octree_search.h>
+//#include <pcl_ros/point_cloud.hpp>
+#include <pcl_ros/transforms.hpp>
+#include <pcl/io/pcd_io.h>
+//#include <pcl/features/normal_3d_omp.h>
+#include <pcl/common/transforms.h>
+//#include <pcl/filters/voxel_grid.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_types.h>
+
+using namespace std::chrono_literals;
+using std::placeholders::_1;
+
+/* This example creates a subclass of Node and uses std::bind() to register a
+* member function as a callback from the timer. */
+
+class LidarMapper : public rclcpp::Node
+{
 private:
 
+    /* ------------------------------ variables------------------------------------------------------------------------- */
+
     bool init;
-    geometry_msgs::msg::TransformStamped get_pose_tf(std::string source_frame, std::string target_frame){
+    rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_;
 
-        geometry_msgs::msg::TransformStamped transformStamped;
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscriber_;
 
-        rclcpp::Time now = this->get_clock()->now();
-        try {
-            transformStamped = tf_buffer_->lookupTransform(
-                        target_frame, source_frame, tf2::TimePointZero); //0, 1ms);
-        }
-        catch (tf2::TransformException & ex) {
-            RCLCPP_INFO(
-                        this->get_logger(), "Could not transform %s to %s: %s",
-                        source_frame.c_str(), target_frame.c_str(), ex.what());
-
-        }
-        transformStamped.header.stamp = now;
-        return transformStamped;
-    }
-
-    bool is_identity(geometry_msgs::msg::TransformStamped t){
-
-        Eigen::Matrix4d test=Eigen::Matrix4d::Identity();
-
-        test(0,3)=t.transform.translation.x;
-        test(1,3)=t.transform.translation.y;
-        test(2,3)=t.transform.translation.z;
-
-        Eigen::Quaterniond q(t.transform.rotation.w , t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z);
-
-        Eigen::Matrix3d R(q);
-
-        test.block(0,0,3,3)=R;
-
-        if (test.isIdentity()){
-            return true;
-        }
-        else{
-            std::cout <<test<<std::endl;
-            return false;
-        }
-    }
-
-    void publish_tf(std::string tp0, std::string tp1, std::string tp2)
-    {
-
-        geometry_msgs::msg::TransformStamped t01, t02;
-
-        while (!init){
-            t01=get_pose_tf(tp1, tp0);
-            t02=get_pose_tf(tp2, tp0);
-
-            if (! is_identity(t01) && !is_identity(t02))
-            {
-                std::cout<<init<<std::endl;
-                init=true;
-
-            }
-            else
-            {
-                 std::cout<<init<<std::endl;
-                init=false;
-            }
-
-        }
-
-
-         t01.child_frame_id=t01.child_frame_id+"_1";
-         t02.child_frame_id=t02.child_frame_id+"_1";
-        while (true){
-
-            tf_broadcaster_->sendTransform(t01);
-            tf_broadcaster_->sendTransform(t02);
-            rclcpp::sleep_for(std::chrono::nanoseconds(250ms));
-
-        }
-    }
-    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    std::string turtlename_;
+    size_t count_;
     std::shared_ptr<tf2_ros::TransformListener> transform_listener_{nullptr};
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    Eigen::Matrix4d base_tf;
+    pcl::PointCloud<pcl::PointXYZI>::Ptr rolling_cloud, rolling_cloud2;
+    double leaf_size;
+    Eigen::Vector3d prev_position;
+    Eigen::Matrix4d map_tf;
 
+    /* ------------------------------functions -------------------------------------------------------------------------*/
+
+    void lidar_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+    {
+
+
+        std::string filename;
+        //filename.precision(16);
+        double filename_d= (double(msg->header.stamp.sec)+double(msg->header.stamp.nanosec)*1e-9);
+
+        filename=std::to_string(filename_d);
+
+        std::cout <<"filename is "<<filename<<" "<<filename<<std::endl;
+
+        std::string currentPath="/home/georges/export";  // TODO: make it a rosparam
+
+        pcl::PCLPointCloud2::Ptr pc2 (new pcl::PCLPointCloud2 ());
+
+        pcl_conversions::toPCL(*msg,*pc2);
+
+        std::vector<int> indices;
+
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+
+        pcl::fromPCLPointCloud2(*pc2,*temp_cloud);
+
+        //pcl::removeNaNFromPointCloud(*temp_cloud, *temp_cloud, indices);
+
+        std::cout<<"Saving "<<temp_cloud->points.size()<<" points"<<std::endl;
+
+        temp_cloud->height=1;
+        temp_cloud->width=temp_cloud->points.size();
+
+        std::string fullPath= currentPath + "/" + filename + ".pcd" ;
+
+        pcl::io::savePCDFileASCII (fullPath, *temp_cloud);
+
+       // rclcpp::sleep_for(std::chrono::nanoseconds(100ms));
+    }
 
 public:
-    FramePublisher()
-        : Node("static_frame_republisher")
+    LidarMapper()
+        : Node("pcd_exporter"), count_(0)
     {
-        init=false;
-        // Declare and acquire `turtlename` parameter
-        //turtlename_ = this->declare_parameter<std::string>("turtlename", "turtle");
 
-        // Initialize the transform broadcaster
-        tf_broadcaster_ =
-                std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
-        // Subscribe to a turtle{1}{2}/pose topic and call handle_turtle_pose
-        // callback function on each message
-        //std::ostringstream stream;
-        //stream << "/" << turtlename_.c_str() << "/pose";
-        //std::string topic_name = stream.str();
+        subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+                    "cloud", 1, std::bind(&LidarMapper::lidar_callback, this, _1));
+
+        base_tf=map_tf=Eigen::Matrix4d::Identity();
+
         rclcpp::TimerBase::SharedPtr timer_{nullptr};
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-        publish_tf("base_link","cloud","virtual_gps");
-
 
     }
 
@@ -130,7 +109,7 @@ public:
 int main(int argc, char * argv[])
 {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<FramePublisher>());
+    rclcpp::spin(std::make_shared<LidarMapper>());
     rclcpp::shutdown();
     return 0;
 }
